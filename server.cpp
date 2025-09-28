@@ -54,8 +54,8 @@ int main() {
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
   struct sockaddr_in addr{};
   addr.sin_family = AF_INET;
-  addr.sin_port = ntohs(1234);
-  addr.sin_addr.s_addr = ntohl(0);
+  addr.sin_port = htons(1234);
+  addr.sin_addr.s_addr = htonl(0);
 
   int rec = bind(fd, (const sockaddr *)&addr, sizeof(addr));
   if (rec) {
@@ -87,11 +87,11 @@ int main() {
       perror("poll()");
     }
     for (size_t i = 1; i < poll_args.size(); i++) {
-      if (poll_args[i].events) {
+      if (poll_args[i].revents) {
         Conn *conn = fd2conn[poll_args[i].fd];
         connection_io(conn);
         if (conn->state == STATE_END) {
-          fd2conn[conn->fd] == NULL;
+          fd2conn[conn->fd] = NULL;
           (void)close(conn->fd);
           free(conn);
         }
@@ -133,7 +133,10 @@ static int32_t accept_new_conn(std::vector<Conn *> &fd2conn, int fd) {
   socklen_t socklen = sizeof(client_addr);
   int connfd = accept(fd, (struct sockaddr *)&client_addr, &socklen);
   if (connfd < 0) {
-    perror("accept()");
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      perror("accept()");
+      return -1;
+    }
     return -1;
   }
   fd_set_nb(connfd);
@@ -219,7 +222,7 @@ static bool try_one_request(Conn *conn) {
   }
 
   // 拿到一个请求，处理一下
-  printf("client says: %. *s\n", len, &conn->rbuf[4]);
+  printf("client says: %.*s\n", len, &conn->rbuf[4]);
 
   // 生成回显响应
   memcpy(&conn->wbuf[0], &len, 4);
