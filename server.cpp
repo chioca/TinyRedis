@@ -51,8 +51,7 @@ int main() {
     perror("sockert()");
   }
   int val = 1;
-  if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)))
-    ;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
   struct sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = ntohs(1234);
@@ -172,15 +171,20 @@ static bool try_fill_buffer(Conn *conn) {
   do {
     size_t cap = sizeof(conn->rbuf) - conn->rbuf_size;
     rv = read(conn->fd, &conn->rbuf[conn->rbuf_size], cap);
-  } while (rv < 0 && errno == EAGAIN);
-  if (rv < 0 || errno == EINTR) {
-    return false;
-  }
+  } while (rv < 0 && errno == EINTR);  // 只重试被信号中断的情况
+
   if (rv < 0) {
-    perror("read() error");
-    conn->state = STATE_END;
-    return false;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      // 没有数据可读
+      return true;
+    } else {
+      perror("read() error");
+      conn->state = STATE_END;
+      return false;
+      return false;
+    }
   }
+
   if (rv == 0) {
     if (conn->rbuf_size > 0) {
       perror("unexpected error");
@@ -192,7 +196,7 @@ static bool try_fill_buffer(Conn *conn) {
   }
 
   conn->rbuf_size += (size_t)rv;
-  assert(conn->rbuf_size <= sizeof(conn->rbuf) - conn->rbuf_size);
+  assert(conn->rbuf_size <= sizeof(conn->rbuf));
   while (try_one_request(conn)) {
   }
   return (conn->state == STATE_REQ);
