@@ -181,7 +181,6 @@ static bool try_fill_buffer(Conn *conn) {
       perror("read() error");
       conn->state = STATE_END;
       return false;
-      return false;
     }
   }
 
@@ -250,16 +249,19 @@ static void state_res(Conn *conn) {
 
 static bool try_flush_buffer(Conn *conn) {
   ssize_t rv = 0;
-  size_t remain = conn->wbuf_size - conn->wbuf_sent;
-  rv = write(conn->fd, &conn->wbuf[conn->wbuf_sent], remain);
-  if (rv < 0 && errno == EAGAIN) {
-    // 遇到EAGAIN，停止写入
-    return false;
-  }
+  do {
+    size_t remain = conn->wbuf_size - conn->wbuf_sent;
+    rv = write(conn->fd, &conn->wbuf[conn->wbuf_sent], remain);
+  } while (rv < 0 && errno == EINTR);
+
   if (rv < 0) {
-    perror("write() error");
-    conn->state = STATE_END;
-    return false;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      return true;
+    } else {
+      perror("write() error");
+      conn->state = STATE_END;
+      return false;
+    }
   }
   conn->wbuf_sent += (size_t)rv;
   assert(conn->wbuf_sent <= conn->wbuf_size);
