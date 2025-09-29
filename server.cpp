@@ -14,16 +14,21 @@
 #include <cerrno>   // errno
 #include <cstring>  // memset(), memcpy() 等（或 <string.h>）
 #include <iostream>
+#include <map>
 #include <vector>
 
 const size_t k_max_msg = 4096;
-
+static std::map<std::string, std::string> g_map;
 enum {
   STATE_REQ = 0,
   STATE_RES = 1,
   STATE_END = 2,  // 标记这个连接，准备删除它
 };
-
+enum {
+  RES_OK = 0,
+  RES_ERR = 1,
+  RES_NX = 2,
+};
 struct Conn {
   int fd = -1;
   uint32_t state = 0;  // 取值为STATE_REQ 或 STATE_RES
@@ -46,6 +51,19 @@ static void connection_io(Conn *conn);
 static bool try_one_request(Conn *conn);
 static void state_res(Conn *conn);
 static bool try_flush_buffer(Conn *conn);
+static int32_t do_request(const uint8_t *req, uint32_t req_len,
+                          uint32_t *res_code, uint8_t *res, uint32_t *res_len);
+static int32_t parse_req(const uint8_t *req, uint32_t req_len,
+                         std::vector<std::string> &cmd);
+inline static bool cmd_is(const std::string &a, const char *b) {
+  return a.size() == strlen(b) && memcmp(a.data(), b, a.size()) == 0;
+}
+static uint32_t do_get(const std::vector<std::string> &cmd, uint8_t *res,
+                       uint32_t *reslen);
+static uint32_t do_set(const std::vector<std::string> &cmd, uint8_t *res,
+                       uint32_t *reslen);
+static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
+                       uint32_t *reslen);
 int main() {
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) {
@@ -216,8 +234,6 @@ static bool try_fill_buffer(Conn *conn) {
   if (rv == 0) {
     if (conn->rbuf_size > 0) {
       perror("unexpected error");
-    } else {
-      printf("EOF");
     }
     conn->state = STATE_END;
     return false;
@@ -248,12 +264,22 @@ static bool try_one_request(Conn *conn) {
   }
 
   // 拿到一个请求，处理一下
-  printf("client says: %.*s\n", len, &conn->rbuf[4]);
+  uint32_t res_code = 0;  // 这里简单起见，响应码总是0
+  uint32_t w_len = 0;
+  int32_t err =
+      do_request(&conn->rbuf[4], len, &res_code, &conn->wbuf[4], &w_len);
+
+  if (err) {
+    conn->state = STATE_END;
+    return false;
+  }
 
   // 生成回显响应
-  memcpy(&conn->wbuf[0], &len, 4);
-  memcpy(&conn->wbuf[4], &conn->rbuf[4], len);
-  conn->wbuf_size = 4 + len;
+  w_len += 4;
+  printf("response len=%u, res_code=%u\n", w_len, res_code);
+  memcpy(&conn->wbuf[0], &w_len, 4);
+  memcpy(&conn->wbuf[4], &res_code, 4);
+  conn->wbuf_size = 4 + w_len;
 
   // 从缓冲区移除这个请求
   // 注意：频繁调用memmove效率可不高
@@ -303,4 +329,83 @@ static bool try_flush_buffer(Conn *conn) {
   }
   // 写缓冲区还有数据，可以再试试写入
   return true;
+}
+static int32_t do_request(const uint8_t *req, uint32_t req_len,
+                          uint32_t *res_code, uint8_t *res, uint32_t *res_len) {
+  std::vector<std::string> cmd;
+  int x = parse_req(req, req_len, cmd);
+  if (0 != x) {
+    perror("Bad Request");
+    return -1;
+  }
+
+  if (cmd.size() == 2 && cmd_is(cmd[0], "get")) {
+    *res_code = do_get(cmd, res, res_len);
+  } else if (cmd.size() == 3 && cmd_is(cmd[0], "set")) {
+    *res_code = do_set(cmd, res, res_len);
+  } else if (cmd.size() == 2 && cmd_is(cmd[0], "del")) {
+    *res_code = do_del(cmd, res, res_len);
+  } else {
+    // 不识别的命令
+    *res_code = RES_ERR;
+    const char *msg = "Unknown cmd";
+    strcpy((char *)res, msg);
+    *res_code = strlen(msg);
+    return 0;
+  }
+  return 0;
+}
+static int32_t parse_req(const uint8_t *req, uint32_t req_len,
+                         std::vector<std::string> &cmd) {
+  uint32_t cur = 0;
+  uint32_t n = 0;  // 读取参数个数
+
+  memcpy(&n, &req[cur], 4);
+  cur += 4;
+  for (uint32_t i = 0; i < n; ++i) {
+    if (cur + 4 > req_len) {
+      printf("error : 1");
+      return -1;
+    }
+    uint32_t slen = 0;  // 读取参数长度
+    memcpy(&slen, &req[cur], 4);
+    cur += 4;
+    if (cur + slen > req_len) {
+      return -1;
+    }
+    cmd.emplace_back((const char *)&req[cur], slen);
+    cur += slen;
+  }
+  if (cur != req_len) {
+    perror("parese_req() error: length mismatch");
+    return -1;
+  }
+  return 0;
+}
+static uint32_t do_get(const std::vector<std::string> &cmd, uint8_t *res,
+                       uint32_t *reslen) {
+  if (!g_map.count(cmd[1])) {
+    return RES_NX;
+  }
+  std::string &val = g_map[cmd[1]];
+  assert(val.size() <= k_max_msg);
+  memcpy(res, val.data(), val.size());
+  *reslen = (uint32_t)val.size();
+  return RES_OK;
+}
+
+static uint32_t do_set(const std::vector<std::string> &cmd, uint8_t *res,
+                       uint32_t *reslen) {
+  (void)res;
+  (void)reslen;
+  g_map[cmd[1]] = cmd[2];
+  return RES_OK;
+}
+
+static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
+                       uint32_t *reslen) {
+  (void)res;
+  (void)reslen;
+  g_map.erase(cmd[1]);
+  return RES_OK;
 }
