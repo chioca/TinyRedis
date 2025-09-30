@@ -11,16 +11,15 @@
 #include <unistd.h>      // close()
 
 #include <cassert>
-#include <cerrno>   // errno
+#include <cerrno>  // errno
+#include <cstddef>
 #include <cstring>  // memset(), memcpy() 等（或 <string.h>）
 #include <iostream>
 #include <map>
 #include <vector>
-#define container_of(ptr, type, member)              \
-  ({                                                 \
-    const typeof(((type *)0)->member) *mptr = (ptr); \
-    (type *)((char *)mptr - offsetof(type, member)); \
-  })
+#define container_of(ptr, type, member) \
+  ((type *)((char *)(ptr) - offsetof(type, member)))
+
 const size_t k_max_msg = 4096;
 const size_t k_resizing_work = 128;
 const size_t k_max_load_factor = 8;
@@ -104,6 +103,8 @@ static void h_init(Htable *htab, size_t hsize);
 static void h_insert(Htable *htab, Hnode *hnode);
 static Hnode *h_detach(Htable *htab, Hnode **from);
 static void hm_help_resizing(Hmap *hmap);
+static Hnode *hm_lookup(Hmap *hmap, Hnode *hnode,
+                        bool (*cmp)(Hnode *, Hnode *));
 void hm_insert(Hmap *hmap, Hnode *node);
 static void hm_start_resizing(Hmap *hmap);
 Hnode *hm_pop(Hmap *hmap, Hnode *key, bool (*cmp)(Hnode *, Hnode *));
@@ -483,7 +484,8 @@ static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
 }
 
 static void h_init(Htable *htab, size_t hsize) {
-  assert(hsize > 0 && (hsize & (hsize - 1) == 0));  // hsize 必须是2的幂次
+  printf("h_init: size=%zu\n", hsize);
+  assert(hsize > 0 && (hsize & (hsize - 1)) == 0);  // hsize 必须是2的幂次
   htab->capacity = hsize;
   htab->mask = hsize - 1;
   htab->tab = new Hnode *[hsize];
@@ -564,7 +566,9 @@ void hm_insert(Hmap *hmap, Hnode *node) {
 static void hm_start_resizing(Hmap *hmap) {
   assert(hmap->htab2.tab == NULL);
   hmap->htab2 = hmap->htab1;
-  h_init(&hmap->htab1, (hmap->htab2.mask + 1) * 2);
+  size_t new_size = hmap->htab1.capacity * 2;
+  printf("start resizing to %zu\n", new_size);
+  h_init(&hmap->htab1, new_size);
   hmap->resizing_pos = 0;
 }
 Hnode *hm_pop(Hmap *hmap, Hnode *key, bool (*cmp)(Hnode *, Hnode *)) {
