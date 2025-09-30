@@ -150,13 +150,14 @@ static int32_t read_req(int fd) {
     perror("too long");
     return -1;
   }
-  err = read_full(fd, &rbuf[4], len);
+  err = read_full(fd, &rbuf[4], 4);
   if (err) {
     perror("read() error");
     return err;
   }
   rbuf[4 + len] = '\0';
   memcpy(&res_code, &rbuf[4], 4);
-  printf("[%u] %.*s\n", res_code, len - 4, &rbuf[8]);
+  read_full(fd, &rbuf[8], len);
+  printf("[%u] %.*s\n", res_code, len, &rbuf[8]);
   return 0;
 }

@@ -16,6 +16,7 @@
 #include <cstring>  // memset(), memcpy() 等（或 <string.h>）
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <vector>
 #define container_of(ptr, type, member) \
   ((type *)((char *)(ptr) - offsetof(type, member)))
@@ -311,7 +312,7 @@ static bool try_one_request(Conn *conn) {
   uint32_t res_code = 0;  // 这里简单起见，响应码总是0
   uint32_t w_len = 0;
   int32_t err =
-      do_request(&conn->rbuf[4], len, &res_code, &conn->wbuf[4], &w_len);
+      do_request(&conn->rbuf[4], len, &res_code, &conn->wbuf[8], &w_len);
 
   if (err) {
     conn->state = STATE_END;
@@ -319,11 +320,10 @@ static bool try_one_request(Conn *conn) {
   }
 
   // 生成回显响应
-  w_len += 4;
   printf("response len=%u, res_code=%u\n", w_len, res_code);
   memcpy(&conn->wbuf[0], &w_len, 4);
   memcpy(&conn->wbuf[4], &res_code, 4);
-  conn->wbuf_size = 4 + w_len;
+  conn->wbuf_size = 8 + w_len;
 
   // 从缓冲区移除这个请求
   // 注意：频繁调用memmove效率可不高
@@ -438,12 +438,16 @@ static uint32_t do_get(const std::vector<std::string> &cmd, uint8_t *res,
   key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
   Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
   if (!node) {
+    std::string data = std::string("no such key ") + key_node.key;
+    memcpy(res, data.data(), data.size());
+    *reslen = (uint32_t)data.size();
     return RES_NX;
   }
   std::string &val = container_of(node, Entry, hnode)->val;
   assert(val.size() <= k_max_msg);
-  memcpy(res, val.data(), val.size());
-  *reslen = (uint32_t)val.size();
+  std::string data = std::string("res = ") + val;
+  memcpy(res, data.data(), data.size());
+  *reslen = (uint32_t)data.size();
   return RES_OK;
 }
 
@@ -456,14 +460,23 @@ static uint32_t do_set(const std::vector<std::string> &cmd, uint8_t *res,
   key_node.key = cmd[1];
   key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
   Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
+  std::ostringstream oss;
   if (node) {
     container_of(node, Entry, hnode)->val = cmd[2];
+    oss << "update" << cmd[1] << "=" << cmd[2];
+    std::string data = oss.str();
+    memcpy(res, data.data(), data.size());
+    *reslen = (uint32_t)data.size();
   } else {
     Entry *new_entry = new Entry();
     new_entry->key = cmd[1];
     new_entry->val = cmd[2];
     new_entry->hnode.hcode = key_node.hnode.hcode;
     hm_insert(&g_data.db, &new_entry->hnode);
+    oss << "insert " << cmd[1] << "=" << cmd[2];
+    std::string data = oss.str();
+    memcpy(res, data.data(), data.size());
+    *reslen = (uint32_t)data.size();
   }
   return RES_OK;
 }
@@ -478,8 +491,15 @@ static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
   key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
   Hnode *node = hm_pop(&g_data.db, &key_node.hnode, entry_eq);
   if (node) {
+    std::string data = std::string("del ") + key_node.key;
+    memcpy(res, data.data(), data.size());
+    *reslen = (uint32_t)data.size();
     delete (container_of(node, Entry, hnode));
+    return RES_OK;
   }
+  std::string data = std::string("no such key ") + key_node.key;
+  memcpy(res, data.data(), data.size());
+  *reslen = (uint32_t)data.size();
   return RES_NX;
 }
 
