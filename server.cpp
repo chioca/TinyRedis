@@ -537,7 +537,7 @@ static Hnode **h_lookup(Htable *htab, Hnode *hnode,
   if (!htab->tab) return NULL;
   size_t pos = hnode->hcode & htab->mask;
   Hnode **cur = &htab->tab[pos];
-  while (cur) {
+  while (*cur) {
     if (cmp(*cur, hnode)) {
       return cur;
     }
@@ -546,9 +546,11 @@ static Hnode **h_lookup(Htable *htab, Hnode *hnode,
   return NULL;
 }
 static Hnode *h_detach(Htable *htab, Hnode **from) {
+  if (!from || !*from) return NULL;
   Hnode *node = *from;
   *from = (*from)->next;
-  htab->count--;
+  if (htab->count > 0) htab->count--;
+  node->next = NULL;
   return node;
 }
 
