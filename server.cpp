@@ -262,13 +262,18 @@ static bool try_fill_buffer(Conn *conn) {
   ssize_t rv = 0;
   do {
     size_t cap = sizeof(conn->rbuf) - conn->rbuf_size;
+    if (cap == 0) {
+      // 读缓冲区满了，无法继续读
+      errno = 0;
+      return false;
+    }
     rv = read(conn->fd, &conn->rbuf[conn->rbuf_size], cap);
   } while (rv < 0 && errno == EINTR);  // 只重试被信号中断的情况
 
   if (rv < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       // 没有数据可读
-      return true;
+      return false;
     } else {
       perror("read() error");
       conn->state = STATE_END;
@@ -350,12 +355,19 @@ static bool try_flush_buffer(Conn *conn) {
   ssize_t rv = 0;
   do {
     size_t remain = conn->wbuf_size - conn->wbuf_sent;
+    if (remain == 0) {
+      // 写缓冲区数据已经发送完毕
+      conn->state = STATE_REQ;
+      conn->wbuf_sent = 0;
+      conn->wbuf_size = 0;
+      return false;
+    }
     rv = write(conn->fd, &conn->wbuf[conn->wbuf_sent], remain);
   } while (rv < 0 && errno == EINTR);
 
   if (rv < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      return true;
+      return false;
     } else {
       perror("write() error");
       conn->state = STATE_END;
