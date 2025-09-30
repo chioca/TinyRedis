@@ -25,15 +25,35 @@ const size_t k_max_msg = 4096;
 const size_t k_resizing_work = 128;
 const size_t k_max_load_factor = 8;
 static std::map<std::string, std::string> g_map;
+// 标记连接状态
 enum {
   STATE_REQ = 0,
   STATE_RES = 1,
   STATE_END = 2,  // 标记这个连接，准备删除它
 };
+
+// 错误码定义
 enum {
   RES_OK = 0,
   RES_ERR = 1,
   RES_NX = 2,
+};
+
+// 序列化相关错误码
+enum {
+  SER_ERR = 1,
+  SER_STR = 2,
+  SER_INT = 3,
+  SER_ARR = 4,
+  SER_NIL = 5,
+};
+
+enum {
+  ERR_2BIG = 1,
+  ERR_INVAL = 2,
+  ERR_ARGC = 3,
+  ERR_NX = 4,
+  ERR_UNKNOWN = 5,
 };
 struct Conn {
   int fd = -1;
@@ -87,6 +107,7 @@ static void state_res(Conn *conn);
 static bool try_flush_buffer(Conn *conn);
 static int32_t do_request(const uint8_t *req, uint32_t req_len,
                           uint32_t *res_code, uint8_t *res, uint32_t *res_len);
+static void do_request(const std::vector<std::string> &cmd, std::string &out);
 static int32_t parse_req(const uint8_t *req, uint32_t req_len,
                          std::vector<std::string> &cmd);
 inline static bool cmd_is(const std::string &a, const char *b) {
@@ -109,6 +130,22 @@ static Hnode *hm_lookup(Hmap *hmap, Hnode *hnode,
 void hm_insert(Hmap *hmap, Hnode *node);
 static void hm_start_resizing(Hmap *hmap);
 Hnode *hm_pop(Hmap *hmap, Hnode *key, bool (*cmp)(Hnode *, Hnode *));
+static size_t hm_size(Hmap *hmap);
+// 序列化相关函数
+static void out_nil(std::string &out);
+static void out_str(std::string &out, const std::string &val);
+static void out_int(std::string &out, int64_t val);
+static void out_err(std::string &out, int32_t code, const std::string &msg);
+static void out_arr(std::string &out, uint32_t n);
+
+// 序列化重构处理不同命令函数
+static void h_scan(Htable *tab, void (*f)(Hnode *, void *), void *arg);
+
+static void cb_scan(Hnode *node, void *arg);
+static void do_keys(std::vector<std::string> &cmd, std::string &out);
+static void do_get(std::vector<std::string> &cmd, std::string &out);
+static void do_set(std::vector<std::string> &cmd, std::string &out);
+static void do_del(std::vector<std::string> &cmd, std::string &out);
 int main() {
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) {
@@ -304,7 +341,7 @@ static bool try_one_request(Conn *conn) {
   uint32_t len = 0;
   memcpy(&len, &conn->rbuf[0], 4);
   if (len > k_max_msg) {
-    perror("too long");
+    printf("too long");
     conn->state = STATE_END;
     return false;
   }
@@ -312,24 +349,27 @@ static bool try_one_request(Conn *conn) {
     // 缓冲区数据不够，下次循环再试试
     return false;
   }
-
-  // 拿到一个请求，处理一下
-  uint32_t res_code = 0;  // 这里简单起见，响应码总是0
-  uint32_t w_len = 0;
-  int32_t err =
-      do_request(&conn->rbuf[4], len, &res_code, &conn->wbuf[8], &w_len);
-
-  if (err) {
+  std::vector<std::string> cmd;
+  if (0 != parse_req(&conn->rbuf[4], len, cmd)) {
     conn->state = STATE_END;
     return false;
   }
 
+  // 拿到一个请求，处理一下
+  std::string out;
+  do_request(cmd, out);
+  if (out.size() > k_max_msg) {
+    conn->state = STATE_END;
+    out.clear();
+    out_err(out, ERR_2BIG, "response too long");
+    return false;
+  }
   // 生成回显响应
-  printf("response len=%u, res_code=%u\n", w_len, res_code);
-  memcpy(&conn->wbuf[0], &w_len, 4);
-  memcpy(&conn->wbuf[4], &res_code, 4);
-  conn->wbuf_size = 8 + w_len;
-
+  uint32_t res_len = (uint32_t)out.size();
+  memcpy(&conn->wbuf[0], &res_len, 4);
+  memcpy(&conn->wbuf[4], out.data(), res_len);
+  conn->wbuf_size = 4 + res_len;
+  conn->wbuf_sent = 0;
   // 从缓冲区移除这个请求
   // 注意：频繁调用memmove效率可不高
   // 注意：生产环境的代码得优化下这部分
@@ -638,4 +678,126 @@ Hnode *hm_pop(Hmap *hmap, Hnode *key, bool (*cmp)(Hnode *, Hnode *)) {
     from = h_lookup(&hmap->htab2, key, cmp);
     return from ? h_detach(&hmap->htab2, from) : NULL;
   }
+}
+static void do_request(std::vector<std::string> &cmd, std::string &out) {
+  if (cmd.size() == 1 && cmd_is(cmd[0], "keys")) {
+    do_keys(cmd, out);
+  } else if (cmd.size() == 2 && cmd_is(cmd[0], "get")) {
+    do_get(cmd, out);
+  } else if (cmd.size() == 3 && cmd_is(cmd[0], "set")) {
+    do_set(cmd, out);
+  } else if (cmd.size() == 2 && cmd_is(cmd[0], "del")) {
+    do_del(cmd, out);
+  } else {
+    // 无法识别的命令
+    out_err(out, ERR_UNKNOWN, "Unknown cmd");
+  }
+}
+static void out_nil(std::string &out) { out.push_back(SER_NIL); }
+
+static void out_str(std::string &out, const std::string &val) {
+  out.push_back(SER_STR);
+  uint32_t len = (uint32_t)val.size();
+  out.append((char *)&len, 4);
+  out.append(val);
+}
+
+static void out_int(std::string &out, int64_t val) {
+  out.push_back(SER_INT);
+  out.append((char *)&val, 8);
+}
+
+static void out_err(std::string &out, int32_t code, const std::string &msg) {
+  out.push_back(SER_ERR);
+  out.append((char *)&code, 4);
+  uint32_t len = (uint32_t)msg.size();
+  out.append((char *)&len, 4);
+  out.append(msg);
+}
+
+static void out_arr(std::string &out, uint32_t n) {
+  out.push_back(SER_ARR);
+  out.append((char *)&n, 4);
+}
+
+static void h_scan(Htable *tab, void (*f)(Hnode *, void *), void *arg) {
+  if (tab->count == 0) {
+    return;
+  }
+  for (size_t i = 0; i < tab->capacity; ++i) {
+    Hnode *node = tab->tab[i];
+    while (node) {
+      f(node, arg);
+      node = node->next;
+    }
+  }
+}
+
+static void cb_scan(Hnode *node, void *arg) {
+  std::string &out = *(std::string *)arg;
+  out_str(out, container_of(node, Entry, hnode)->key);
+}
+
+static void do_keys(std::vector<std::string> &cmd, std::string &out) {
+  (void)cmd;
+  out_arr(out, (uint32_t)hm_size(&g_data.db));
+  h_scan(&g_data.db.htab1, &cb_scan, &out);
+  h_scan(&g_data.db.htab2, &cb_scan, &out);
+}
+static void do_get(std::vector<std::string> &cmd, std::string &out) {
+  if (cmd.size() != 2) {
+    out_err(out, ERR_ARGC, "argc != 2");
+    return;
+  }
+  Entry key_node;
+  key_node.key = cmd[1];
+  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
+  if (!node) {
+    out_err(out, ERR_NX, "no such key");
+    return;
+  }
+  std::string &val = container_of(node, Entry, hnode)->val;
+  out_str(out, val);
+}
+static void do_set(std::vector<std::string> &cmd, std::string &out) {
+  if (cmd.size() != 3) {
+    out_err(out, ERR_ARGC, "argc != 3");
+    return;
+  }
+  Entry key_node;
+  key_node.key = cmd[1];
+  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
+  if (node) {
+    container_of(node, Entry, hnode)->val = cmd[2];
+    out_str(out, std::string("update ") + cmd[1] + "=" + cmd[2]);
+  } else {
+    Entry *new_entry = new Entry();
+    new_entry->key = cmd[1];
+    new_entry->val = cmd[2];
+    new_entry->hnode.hcode = key_node.hnode.hcode;
+    hm_insert(&g_data.db, &new_entry->hnode);
+    out_str(out, std::string("insert ") + cmd[1] + "=" + cmd[2]);
+  }
+}
+static void do_del(std::vector<std::string> &cmd, std::string &out) {
+  if (cmd.size() != 2) {
+    out_err(out, ERR_ARGC, "argc != 2");
+    return;
+  }
+  Entry key_node;
+  key_node.key = cmd[1];
+  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  Hnode *node = hm_pop(&g_data.db, &key_node.hnode, entry_eq);
+  if (node) {
+    out_str(out, std::string("del ") + key_node.key);
+    delete (container_of(node, Entry, hnode));
+    return;
+  }
+  out_err(out, ERR_NX, "no such key");
+}
+static size_t hm_size(Hmap *hmap) {
+  if (!hmap) return 0;
+  return hmap->htab1.count + hmap->htab2.count;
 }
