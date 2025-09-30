@@ -50,7 +50,9 @@ struct Hnode {
 
 struct Htable {
   Hnode **tab = NULL;
-  size_t size = 0;
+  // size_t size = 0;
+  size_t capacity = 0;
+  size_t count = 0;
   size_t mask = 0;
 };
 
@@ -439,7 +441,7 @@ static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
 
 static void h_init(Htable *htab, size_t hsize) {
   assert(hsize > 0 && (hsize & (hsize - 1) == 0));  // hsize 必须是2的幂次
-  htab->size = hsize;
+  htab->capacity = hsize;
   htab->mask = hsize - 1;
   htab->tab = new Hnode *[hsize];
 }
@@ -448,7 +450,7 @@ static void h_insert(Htable *htab, Hnode *hnode) {
   Hnode *ori = htab->tab[idx];
   hnode->next = ori;
   htab->tab[idx] = hnode;
-  htab->size++;
+  htab->count++;
 }
 
 static Hnode **h_lookup(Htable *htab, Hnode *hnode,
@@ -467,7 +469,7 @@ static Hnode **h_lookup(Htable *htab, Hnode *hnode,
 static Hnode *h_detach(Htable *htab, Hnode **from) {
   Hnode *node = *from;
   *from = (*from)->next;
-  htab->size--;
+  htab->count--;
   return node;
 }
 
@@ -486,7 +488,7 @@ static void hm_help_resizing(Hmap *hmap) {
     return;
   }
   size_t nwork = 0;  // 每次帮忙搬移一个桶
-  while (nwork < k_resizing_work && hmap->htab2.size > 0) {
+  while (nwork < k_resizing_work && hmap->htab2.capacity > 0) {
     /* code */
     Hnode **from = &hmap->htab2.tab[hmap->resizing_pos];
     if (!*from) {
@@ -496,7 +498,7 @@ static void hm_help_resizing(Hmap *hmap) {
     h_insert(&hmap->htab1, h_detach(&hmap->htab2, from));
     nwork++;
   }
-  if (hmap->htab2.size == 0) {
+  if (hmap->htab2.capacity == 0) {
     delete (hmap->htab2.tab);
     hmap->htab2 = Htable{};
   }
@@ -509,7 +511,7 @@ void hm_insert(Hmap *hmap, Hnode *node) {
   h_insert(&hmap->htab1, node);
   if (!hmap->htab2.tab) {
     // 检查是否需要调整大小
-    size_t load_factor = hmap->htab1.size / (hmap->htab1.mask + 1);
+    size_t load_factor = hmap->htab1.count / hmap->htab1.capacity;
     if (load_factor > k_max_load_factor) {
       hm_start_resizing(hmap);
     }
