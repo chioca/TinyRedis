@@ -520,6 +520,9 @@ static void h_init(Htable *htab, size_t hsize) {
   htab->capacity = hsize;
   htab->mask = hsize - 1;
   htab->tab = new Hnode *[hsize];
+  for (size_t i = 0; i < hsize; i++) {
+    htab->tab[i] = NULL;
+  }
 }
 static void h_insert(Htable *htab, Hnode *hnode) {
   size_t idx = hnode->hcode & htab->mask;
