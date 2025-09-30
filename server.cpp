@@ -41,6 +41,17 @@ struct Conn {
   uint8_t wbuf[4 + k_max_msg];
 };
 
+struct Hnode {
+  Hnode *next = NULL;
+  uint64_t hcode = 0;
+};
+
+struct Htable {
+  Hnode **tab = NULL;
+  size_t size = 0;
+  size_t mask = 0;
+};
+
 static void fd_set_nb(int fd);
 static void connection_io(Conn *conn);
 static void conn_put(std::vector<Conn *> &fd2conn, struct Conn *conn);
@@ -64,6 +75,11 @@ static uint32_t do_set(const std::vector<std::string> &cmd, uint8_t *res,
                        uint32_t *reslen);
 static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
                        uint32_t *reslen);
+
+// 哈希表相关函数
+static void h_init(Htable *htab, size_t hsize);
+static void h_insert(Htable *htab, Hnode *hnode);
+static Hnode *h_detach(Htable *htab, Hnode **from);
 int main() {
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) {
@@ -408,4 +424,38 @@ static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
   (void)reslen;
   g_map.erase(cmd[1]);
   return RES_OK;
+}
+
+static void h_init(Htable *htab, size_t hsize) {
+  assert(hsize > 0 && (hsize & (hsize - 1) == 0));  // hsize 必须是2的幂次
+  htab->size = hsize;
+  htab->mask = hsize - 1;
+  htab->tab = new Hnode *[hsize];
+}
+static void h_insert(Htable *htab, Hnode *hnode) {
+  size_t idx = hnode->hcode & htab->mask;
+  Hnode *ori = htab->tab[idx];
+  hnode->next = ori;
+  htab->tab[idx] = hnode;
+  htab->size++;
+}
+
+static Hnode **h_lookup(Htable *htab, Hnode *hnode,
+                        bool (*cmp)(Hnode *, Hnode *)) {
+  if (!htab->tab) return NULL;
+  size_t pos = hnode->hcode & htab->mask;
+  Hnode **cur = &htab->tab[pos];
+  while (cur) {
+    if (cmp(*cur, hnode)) {
+      return cur;
+    }
+    cur = &(*cur)->next;
+  }
+  return NULL;
+}
+static Hnode *h_detach(Htable *htab, Hnode **from) {
+  Hnode *node = *from;
+  *from = (*from)->next;
+  htab->size--;
+  return node;
 }
