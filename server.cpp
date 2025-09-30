@@ -525,11 +525,11 @@ static void hm_start_resizing(Hmap *hmap) {
 Hnode *hm_pop(Hmap *hmap, Hnode *key, bool (*cmp)(Hnode *, Hnode *)) {
   hm_help_resizing(hmap);
   Hnode **from = h_lookup(&hmap->htab1, key, cmp);
-  if (!from) {
+  if (from) {
+    // from = h_lookup(&hmap->htab2, key, cmp);
+    return h_detach(&hmap->htab1, from);
+  } else {
     from = h_lookup(&hmap->htab2, key, cmp);
+    return from ? h_detach(&hmap->htab2, from) : NULL;
   }
-  if (!from) {
-    return NULL;
-  }
-  return h_detach(&hmap->htab1, from);
 }
