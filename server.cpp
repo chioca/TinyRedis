@@ -16,7 +16,11 @@
 #include <iostream>
 #include <map>
 #include <vector>
-
+#define container_of(ptr, type, member)              \
+  ({                                                 \
+    const typeof(((type *)0)->member) *mptr = (ptr); \
+    (type *)((char *)mptr - offsetof(type, member)); \
+  })
 const size_t k_max_msg = 4096;
 const size_t k_resizing_work = 128;
 const size_t k_max_load_factor = 8;
@@ -62,6 +66,15 @@ struct Hmap {
   size_t resizing_pos = 0;
 };
 
+struct Entry {
+  struct Hnode hnode;
+  std::string key;
+  std::string val;
+};
+
+static struct {
+  Hmap db;
+} g_data;
 static void fd_set_nb(int fd);
 static void connection_io(Conn *conn);
 static void conn_put(std::vector<Conn *> &fd2conn, struct Conn *conn);
@@ -79,6 +92,7 @@ static int32_t parse_req(const uint8_t *req, uint32_t req_len,
 inline static bool cmd_is(const std::string &a, const char *b) {
   return a.size() == strlen(b) && memcmp(a.data(), b, a.size()) == 0;
 }
+static bool entry_eq(Hnode *lhs, Hnode *rhs);
 static uint32_t do_get(const std::vector<std::string> &cmd, uint8_t *res,
                        uint32_t *reslen);
 static uint32_t do_set(const std::vector<std::string> &cmd, uint8_t *res,
@@ -411,12 +425,21 @@ static int32_t parse_req(const uint8_t *req, uint32_t req_len,
   }
   return 0;
 }
+static bool entry_eq(Hnode *lhs, Hnode *rhs) {
+  struct Entry *le = container_of(lhs, struct Entry, hnode);
+  struct Entry *re = container_of(rhs, struct Entry, hnode);
+  return lhs->hcode == rhs->hcode && le->key == re->key;
+}
 static uint32_t do_get(const std::vector<std::string> &cmd, uint8_t *res,
                        uint32_t *reslen) {
-  if (!g_map.count(cmd[1])) {
+  Entry key_node;
+  key_node.key = cmd[1];
+  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
+  if (node) {
     return RES_NX;
   }
-  std::string &val = g_map[cmd[1]];
+  std::string &val = container_of(node, Entry, hnode)->val;
   assert(val.size() <= k_max_msg);
   memcpy(res, val.data(), val.size());
   *reslen = (uint32_t)val.size();
@@ -427,7 +450,20 @@ static uint32_t do_set(const std::vector<std::string> &cmd, uint8_t *res,
                        uint32_t *reslen) {
   (void)res;
   (void)reslen;
-  g_map[cmd[1]] = cmd[2];
+  // g_map[cmd[1]] = cmd[2];
+  Entry key_node;
+  key_node.key = cmd[1];
+  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
+  if (node) {
+    container_of(node, Entry, hnode)->val = cmd[2];
+  } else {
+    Entry *new_entry = new Entry();
+    new_entry->key = cmd[1];
+    new_entry->val = cmd[2];
+    new_entry->hnode.hcode = key_node.hnode.hcode;
+    hm_insert(&g_data.db, &new_entry->hnode);
+  }
   return RES_OK;
 }
 
@@ -435,8 +471,15 @@ static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
                        uint32_t *reslen) {
   (void)res;
   (void)reslen;
-  g_map.erase(cmd[1]);
-  return RES_OK;
+  // g_map.erase(cmd[1]);
+  Entry key_node;
+  key_node.key = cmd[1];
+  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  Hnode *node = hm_pop(&g_data.db, &key_node.hnode, entry_eq);
+  if (node) {
+    delete (container_of(node, Entry, hnode));
+  }
+  return RES_NX;
 }
 
 static void h_init(Htable *htab, size_t hsize) {
