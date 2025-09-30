@@ -20,7 +20,7 @@
 #include <vector>
 #define container_of(ptr, type, member) \
   ((type *)((char *)(ptr) - offsetof(type, member)))
-
+#define LISTON_PORT 1234
 const size_t k_max_msg = 4096;
 const size_t k_resizing_work = 128;
 const size_t k_max_load_factor = 8;
@@ -118,8 +118,8 @@ int main() {
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
   struct sockaddr_in addr{};
   addr.sin_family = AF_INET;
-  addr.sin_port = htons(1234);
-  addr.sin_addr.s_addr = htonl(0);
+  addr.sin_port = htons(LISTON_PORT);
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
   int rec = bind(fd, (const sockaddr *)&addr, sizeof(addr));
   if (rec) {
