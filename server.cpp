@@ -620,9 +620,10 @@ void hm_insert(Hmap *hmap, Hnode *node) {
   hm_help_resizing(hmap);
 }
 static void hm_start_resizing(Hmap *hmap) {
+  assert(hmap != NULL);
   assert(hmap->htab2.tab == NULL);
   hmap->htab2 = hmap->htab1;
-  size_t new_size = hmap->htab1.capacity * 2;
+  size_t new_size = hmap->htab1.capacity == 0 ? 4 : hmap->htab1.capacity * 2;
   printf("start resizing to %zu\n", new_size);
   h_init(&hmap->htab1, new_size);
   hmap->resizing_pos = 0;
