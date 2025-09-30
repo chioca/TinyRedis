@@ -107,7 +107,7 @@ static void state_res(Conn *conn);
 static bool try_flush_buffer(Conn *conn);
 static int32_t do_request(const uint8_t *req, uint32_t req_len,
                           uint32_t *res_code, uint8_t *res, uint32_t *res_len);
-static void do_request(const std::vector<std::string> &cmd, std::string &out);
+static void do_request(std::vector<std::string> &cmd, std::string &out);
 static int32_t parse_req(const uint8_t *req, uint32_t req_len,
                          std::vector<std::string> &cmd);
 inline static bool cmd_is(const std::string &a, const char *b) {

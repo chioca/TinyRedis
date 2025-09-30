@@ -11,12 +11,22 @@
 #include <cstring>  // memset(), memcpy() 等（或 <string.h>）
 #include <string>
 #include <vector>
+
+enum {
+  SER_ERR = 1,
+  SER_STR = 2,
+  SER_INT = 3,
+  SER_ARR = 4,
+  SER_NIL = 5,
+};
 const size_t k_max_msg = 4096;
 static int32_t read_full(int fd, char *buf, size_t n);
 static int32_t write_all(int fd, const char *buf, size_t n);
 static int32_t query(int fd, const char *text);
 static int32_t send_req(int fd, const std::vector<std::string> &cmd);
 static int32_t read_req(int fd);
+static int32_t on_response(const uint8_t *data, size_t size);
+
 int main(int argc, char *argv[]) {
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) {
@@ -150,14 +160,87 @@ static int32_t read_req(int fd) {
     perror("too long");
     return -1;
   }
-  err = read_full(fd, &rbuf[4], 4);
+  err = read_full(fd, &rbuf[4], len);
   if (err) {
     perror("read() error");
     return err;
   }
-  rbuf[4 + len] = '\0';
-  memcpy(&res_code, &rbuf[4], 4);
-  read_full(fd, &rbuf[8], len);
-  printf("[%u] %.*s\n", res_code, len, &rbuf[8]);
+  on_response((const uint8_t *)&rbuf[4], len);
+
   return 0;
+}
+
+static int32_t on_response(const uint8_t *data, size_t size) {
+  if (size < 1) {
+    printf("Bad Response\n");
+    return -1;
+  }
+  switch (data[0]) {
+    case SER_NIL:
+      /* code */
+      printf("(nil)\n");
+      return 1;
+    case SER_ERR: {
+      if (size < 1 + 8) {
+        printf("Bad Response\n");
+        return -1;
+      }
+      int32_t code = 0;
+      memcpy(&code, &data[1], 4);
+      uint32_t len = 0;
+      memcpy(&len, &data[5], 4);
+      if (size < 1 + 8 + len) {
+        printf("Bad Response\n");
+        return -1;
+      }
+      printf("Error %d: %.*s\n", code, len, (const char *)&data[9]);
+      return 0;
+    }
+    case SER_STR: {
+      if (size < 1 + 4) {
+        printf("Bad Response\n");
+        return -1;
+      }
+      uint32_t slen = 0;
+      memcpy(&slen, &data[1], 4);
+      if (size < 1 + 4 + slen) {
+        printf("Bad Response\n");
+        return -1;
+      }
+      printf("%.*s\n", slen, (const char *)&data[5]);
+      return (int32_t)1 + 4 + slen;
+    }
+    case SER_INT: {
+      if (size < 1 + 8) {
+        printf("Bad Response\n");
+        return -1;
+      }
+      int64_t val = 0;
+      memcpy(&val, &data[1], 8);
+      printf("%lld\n", (long long)val);
+      return (int32_t)1 + 8;
+    }
+    case SER_ARR: {
+      if (size < 1 + 4) {
+        printf("Bad Response\n");
+        return -1;
+      }
+      uint32_t n = 0;
+      memcpy(&n, &data[1], 4);
+      printf("(arr) len = %u\n", n);
+      size_t arr_bytes = 1 + 4;
+      for (uint32_t i = 0; i < n; i++) {
+        int32_t rv = on_response(&data[arr_bytes], size - arr_bytes);
+        if (rv < 0) {
+          return -1;
+        }
+        arr_bytes += rv;
+      }
+      printf("(arr) end\n");
+      return (int32_t)arr_bytes;
+    }
+    default:
+      printf("Bad Response\n");
+      return -1;
+  }
 }
