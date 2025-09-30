@@ -565,23 +565,43 @@ static Hnode *hm_lookup(Hmap *hmap, Hnode *hnode,
 }
 
 static void hm_help_resizing(Hmap *hmap) {
+  if (!hmap) return;
   if (hmap->htab2.tab == NULL) {
     return;
   }
   size_t nwork = 0;  // 每次帮忙搬移一个桶
-  while (nwork < k_resizing_work && hmap->htab2.capacity > 0) {
+  while (nwork < k_resizing_work && hmap->htab2.tab &&
+         hmap->htab2.capacity > 0) {
     /* code */
+    if (hmap->resizing_pos >= hmap->htab2.capacity) {
+      break;
+    }
     Hnode **from = &hmap->htab2.tab[hmap->resizing_pos];
     if (!*from) {
       hmap->resizing_pos++;
       continue;
     }
-    h_insert(&hmap->htab1, h_detach(&hmap->htab2, from));
+    Hnode *moved = h_detach(&hmap->htab2, from);
+    if (moved) {
+      h_insert(&hmap->htab1, moved);
+    }
     nwork++;
   }
-  if (hmap->htab2.capacity == 0) {
-    delete (hmap->htab2.tab);
+  bool finished = true;
+  if (hmap->htab2.tab) {
+    for (size_t i = hmap->resizing_pos; i < hmap->htab2.capacity; i++) {
+      if (hmap->htab2.tab[i]) {
+        finished = false;
+        break;
+      }
+    }
+  }
+  if (finished) {
+    if (hmap->htab2.tab) {
+      delete[] hmap->htab2.tab;
+    }
     hmap->htab2 = Htable{};
+    hmap->resizing_pos = 0;
   }
 }
 
