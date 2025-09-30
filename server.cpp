@@ -18,6 +18,8 @@
 #include <vector>
 
 const size_t k_max_msg = 4096;
+const size_t k_resizing_work = 128;
+const size_t k_max_load_factor = 8;
 static std::map<std::string, std::string> g_map;
 enum {
   STATE_REQ = 0,
@@ -52,6 +54,12 @@ struct Htable {
   size_t mask = 0;
 };
 
+struct Hmap {
+  Htable htab1;
+  Htable htab2;
+  size_t resizing_pos = 0;
+};
+
 static void fd_set_nb(int fd);
 static void connection_io(Conn *conn);
 static void conn_put(std::vector<Conn *> &fd2conn, struct Conn *conn);
@@ -75,11 +83,14 @@ static uint32_t do_set(const std::vector<std::string> &cmd, uint8_t *res,
                        uint32_t *reslen);
 static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
                        uint32_t *reslen);
-
 // 哈希表相关函数
 static void h_init(Htable *htab, size_t hsize);
 static void h_insert(Htable *htab, Hnode *hnode);
 static Hnode *h_detach(Htable *htab, Hnode **from);
+static void hm_help_resizing(Hmap *hmap);
+void hm_insert(Hmap *hmap, Hnode *node);
+static void hm_start_resizing(Hmap *hmap);
+Hnode *hm_pop(Hmap *hmap, Hnode *key, bool (*cmp)(Hnode *, Hnode *));
 int main() {
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) {
@@ -458,4 +469,67 @@ static Hnode *h_detach(Htable *htab, Hnode **from) {
   *from = (*from)->next;
   htab->size--;
   return node;
+}
+
+static Hnode *hm_lookup(Hmap *hmap, Hnode *hnode,
+                        bool (*cmp)(Hnode *, Hnode *)) {
+  hm_help_resizing(hmap);
+  Hnode **res = h_lookup(&hmap->htab1, hnode, cmp);
+  if (!res) {
+    res = h_lookup(&hmap->htab2, hnode, cmp);
+  }
+  return res ? *res : NULL;
+}
+
+static void hm_help_resizing(Hmap *hmap) {
+  if (hmap->htab2.tab == NULL) {
+    return;
+  }
+  size_t nwork = 0;  // 每次帮忙搬移一个桶
+  while (nwork < k_resizing_work && hmap->htab2.size > 0) {
+    /* code */
+    Hnode **from = &hmap->htab2.tab[hmap->resizing_pos];
+    if (!*from) {
+      hmap->resizing_pos++;
+      continue;
+    }
+    h_insert(&hmap->htab1, h_detach(&hmap->htab2, from));
+    nwork++;
+  }
+  if (hmap->htab2.size == 0) {
+    delete (hmap->htab2.tab);
+    hmap->htab2 = Htable{};
+  }
+}
+
+void hm_insert(Hmap *hmap, Hnode *node) {
+  if (!hmap->htab1.tab) {
+    h_init(&hmap->htab1, 4);
+  }
+  h_insert(&hmap->htab1, node);
+  if (!hmap->htab2.tab) {
+    // 检查是否需要调整大小
+    size_t load_factor = hmap->htab1.size / (hmap->htab1.mask + 1);
+    if (load_factor > k_max_load_factor) {
+      hm_start_resizing(hmap);
+    }
+  }
+  hm_help_resizing(hmap);
+}
+static void hm_start_resizing(Hmap *hmap) {
+  assert(hmap->htab2.tab == NULL);
+  hmap->htab2 = hmap->htab1;
+  h_init(&hmap->htab1, (hmap->htab2.mask + 1) * 2);
+  hmap->resizing_pos = 0;
+}
+Hnode *hm_pop(Hmap *hmap, Hnode *key, bool (*cmp)(Hnode *, Hnode *)) {
+  hm_help_resizing(hmap);
+  Hnode **from = h_lookup(&hmap->htab1, key, cmp);
+  if (!from) {
+    from = h_lookup(&hmap->htab2, key, cmp);
+  }
+  if (!from) {
+    return NULL;
+  }
+  return h_detach(&hmap->htab1, from);
 }
