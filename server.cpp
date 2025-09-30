@@ -394,7 +394,7 @@ static int32_t do_request(const uint8_t *req, uint32_t req_len,
     *res_code = RES_ERR;
     const char *msg = "Unknown cmd";
     strcpy((char *)res, msg);
-    *res_code = strlen(msg);
+    *res_len = strlen(msg);
     return 0;
   }
   return 0;
@@ -437,7 +437,7 @@ static uint32_t do_get(const std::vector<std::string> &cmd, uint8_t *res,
   key_node.key = cmd[1];
   key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
   Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
-  if (node) {
+  if (!node) {
     return RES_NX;
   }
   std::string &val = container_of(node, Entry, hnode)->val;
@@ -484,7 +484,6 @@ static uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
 }
 
 static void h_init(Htable *htab, size_t hsize) {
-  printf("h_init: size=%zu\n", hsize);
   assert(hsize > 0 && (hsize & (hsize - 1)) == 0);  // hsize 必须是2的幂次
   htab->capacity = hsize;
   htab->mask = hsize - 1;
