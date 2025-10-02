@@ -1,3 +1,8 @@
+#include <netinet/in.h>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include "hmap.h"
 int main() {
   int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -8,7 +13,7 @@ int main() {
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
   struct sockaddr_in addr{};
   addr.sin_family = AF_INET;
-  addr.sin_port = htons(LISTON_PORT);
+  addr.sin_port = htons(LISTEN_PORT);
   addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
   int rec = bind(fd, (const sockaddr *)&addr, sizeof(addr));

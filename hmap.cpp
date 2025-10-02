@@ -1,13 +1,16 @@
 #include "hmap.h"
 
-#include <arpa/inet.h>   // sockaddr_in, htons, inet_pton 等
-#include <errno.h>       // errno, EAGAIN, EWOULDBLOCK, EINTR
-#include <fcntl.h>       // fcntl(), O_NONBLOCK
-#include <netinet/in.h>  // sockaddr_in
-#include <sys/socket.h>  // accept(), socket(), bind(), listen(), connect()
-#include <unistd.h>      // read(), write(), close()
+#include <arpa/inet.h>  // inet_pton, inet_ntop（如果你后面要用）
+#include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>  // sockaddr_in, htons, htonl, INADDR_ANY
+#include <stdio.h>       // printf, perror
+#include <string.h>      // memset, memcpy
+#include <sys/epoll.h>  // epoll_create1, epoll_ctl, epoll_wait, epoll_event, EPOLLIN, EPOLLOUT, ...
+#include <sys/socket.h>
+#include <unistd.h>
 
-#include <cassert>
 #include <sstream>
 void fd_set_nb(int fd) {
   errno = 0;
