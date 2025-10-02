@@ -12,6 +12,8 @@
 #include <unistd.h>
 
 #include <sstream>
+
+#include "common.h"
 void fd_set_nb(int fd) {
   errno = 0;
   int flags = fcntl(fd, F_GETFL, 0);
@@ -269,7 +271,8 @@ uint32_t do_get(const std::vector<std::string> &cmd, uint8_t *res,
                 uint32_t *reslen) {
   Entry key_node;
   key_node.key = cmd[1];
-  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  key_node.hnode.hcode =
+      str_hash((uint8_t *)key_node.key.data(), key_node.key.size());
   Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
   if (!node) {
     std::string data = std::string("no such key ") + key_node.key;
@@ -292,7 +295,8 @@ uint32_t do_set(const std::vector<std::string> &cmd, uint8_t *res,
   // g_map[cmd[1]] = cmd[2];
   Entry key_node;
   key_node.key = cmd[1];
-  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  key_node.hnode.hcode =
+      str_hash((uint8_t *)key_node.key.data(), key_node.key.size());
   Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
   std::ostringstream oss;
   if (node) {
@@ -322,7 +326,8 @@ uint32_t do_del(const std::vector<std::string> &cmd, uint8_t *res,
   // g_map.erase(cmd[1]);
   Entry key_node;
   key_node.key = cmd[1];
-  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  key_node.hnode.hcode =
+      str_hash((uint8_t *)key_node.key.data(), key_node.key.size());
   Hnode *node = hm_pop(&g_data.db, &key_node.hnode, entry_eq);
   if (node) {
     std::string data = std::string("del ") + key_node.key;
@@ -531,7 +536,8 @@ void do_get(std::vector<std::string> &cmd, std::string &out) {
   }
   Entry key_node;
   key_node.key = cmd[1];
-  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  key_node.hnode.hcode =
+      str_hash((uint8_t *)key_node.key.data(), key_node.key.size());
   Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
   if (!node) {
     out_err(out, ERR_NX, "no such key");
@@ -547,7 +553,8 @@ void do_set(std::vector<std::string> &cmd, std::string &out) {
   }
   Entry key_node;
   key_node.key = cmd[1];
-  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  key_node.hnode.hcode =
+      str_hash((uint8_t *)key_node.key.data(), key_node.key.size());
   Hnode *node = hm_lookup(&g_data.db, &key_node.hnode, entry_eq);
   if (node) {
     container_of(node, Entry, hnode)->val = cmd[2];
@@ -568,7 +575,8 @@ void do_del(std::vector<std::string> &cmd, std::string &out) {
   }
   Entry key_node;
   key_node.key = cmd[1];
-  key_node.hnode.hcode = (uint64_t)std::hash<std::string>()(key_node.key);
+  key_node.hnode.hcode =
+      str_hash((uint8_t *)key_node.key.data(), key_node.key.size());
   Hnode *node = hm_pop(&g_data.db, &key_node.hnode, entry_eq);
   if (node) {
     out_str(out, std::string("del ") + key_node.key);
