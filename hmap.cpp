@@ -1,4 +1,14 @@
 #include "hmap.h"
+
+#include <arpa/inet.h>   // sockaddr_in, htons, inet_pton 等
+#include <errno.h>       // errno, EAGAIN, EWOULDBLOCK, EINTR
+#include <fcntl.h>       // fcntl(), O_NONBLOCK
+#include <netinet/in.h>  // sockaddr_in
+#include <sys/socket.h>  // accept(), socket(), bind(), listen(), connect()
+#include <unistd.h>      // read(), write(), close()
+
+#include <cassert>
+#include <sstream>
 void fd_set_nb(int fd) {
   errno = 0;
   int flags = fcntl(fd, F_GETFL, 0);

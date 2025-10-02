@@ -1,28 +1,12 @@
 #pragma once
-
-#include <arpa/inet.h>  // inet_pton(), inet_ntop() 等
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>       // gethostbyname(), getaddrinfo() 等
-#include <netinet/in.h>  // sockaddr_in 结构体、AF_INET、htons 等
-#include <poll.h>
-#include <stdio.h>
-#include <sys/epoll.h>
-#include <sys/socket.h>  // socket(), bind(), connect(), listen(), accept() 等
-#include <sys/types.h>   // 基本数据类型定义
-#include <unistd.h>      // close()
-
-#include <cassert>
-#include <cerrno>  // errno
-#include <cstddef>
-#include <cstring>  // memset(), memcpy() 等（或 <string.h>）
-#include <iostream>
-#include <map>
-#include <sstream>
+#include <cstddef>  // size_t, offsetof
+#include <cstdint>  // uint32_t, uint64_t
+#include <cstring>
+#include <string>
 #include <vector>
 #define container_of(ptr, type, member) \
   ((type *)((char *)(ptr) - offsetof(type, member)))
-#define LISTON_PORT 1234
+constexpr int LISTEN_PORT = 1234;
 const size_t k_max_msg = 4096;
 const size_t k_resizing_work = 128;
 const size_t k_max_load_factor = 8;
