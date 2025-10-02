@@ -48,3 +48,26 @@ AVLNode *avl_fix_right(AVLNode *root) {
   }
   return rot_left(root);
 }
+
+AVLNode *avl_fix(AVLNode *node) {
+  while (true) {
+    avl_update(node);
+    uint32_t l = avl_depth(node->left);
+    uint32_t r = avl_depth(node->right);
+    AVLNode **from = nullptr;
+    if (node->parent) {
+      from = (node->parent->left == node) ? &node->parent->left
+                                          : &node->right->right;
+    }
+    if (l == r + 2) {
+      node = avl_fix_left(node);
+    } else if (l + 2 == r) {
+      node = avl_fix_right(node);
+    }
+    if (!from) {
+      return node;
+    }
+    *from = node;  // 更新父节点的孩子指针, 指向可能旋转后返回的子树
+    node = node->parent;
+  }
+}
