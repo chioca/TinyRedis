@@ -27,3 +27,4 @@ AVLNode *avl_fix_left(AVLNode *root);
 AVLNode *avl_fix_right(AVLNode *root);
 
 AVLNode *avl_fix(AVLNode *root);  // 自下而上修正不平衡的节点
+AVLNode *avl_del(AVLNode *node);

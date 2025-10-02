@@ -71,3 +71,39 @@ AVLNode *avl_fix(AVLNode *node) {
     node = node->parent;
   }
 }
+
+AVLNode *avl_del(AVLNode *node) {
+  if (node->right == nullptr) {
+    // 没有右子树, 用左子树替换改节点
+    AVLNode *parent = node->parent;
+    if (node->left) {
+      node->left->parent = parent;
+    }
+    if (parent) {
+      (parent->left == node ? parent->left : parent->right) = node->left;
+      return avl_fix(parent);
+    } else {  // 删除根节点
+      return node->left;
+    }
+  } else {
+    AVLNode *victim = node->right;
+    while (victim->left) {
+      victim = victim->left;
+    }
+    AVLNode *root = avl_del(victim);
+    *victim = *node;
+    if (victim->left) {
+      victim->left->parent = victim;
+    }
+    if (victim->right) {
+      victim->right->parent = victim;
+    }
+    AVLNode *parent = node->parent;
+    if (parent) {
+      (parent->left == node ? parent->left : parent->right) = victim;
+      return root;
+    } else {
+      return victim;
+    }
+  }
+}
