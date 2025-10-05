@@ -88,3 +88,53 @@ bool zset_insert(ZSet *zset, const char *name, size_t len, double socre) {
     return true;
   }
 }
+
+// 偏移到后继或前驱节点
+/*
+有了嵌入在节点里的大小信息，我们就能判断偏移目标是否在子树内。偏移操作分两个阶段：
+首先，如果目标不在子树内，就沿着树向上走；然后再沿着树向下走，逐渐缩小距离，直到找到目标。不管偏移量多长，
+最坏情况下时间复杂度都是O(log(n))，这可比一个一个往后继节点走（最好情况下时间复杂度为O(偏移量)）强多啦。
+*/
+AVLNode *alv_offset(AVLNode *node, int64_t offset) {
+  int64_t pos = 0;
+  while (offset != pos) {
+    if (pos < offset && pos + avl_cnt(node->right) >= offset) {
+      node = node->right;
+      pos += avl_cnt(node->left) + 1;
+    } else if (pos > offset && pos - avl_cnt(node->left) <= offset) {
+      node = node->left;
+      pos -= avl_cnt(node->right) + 1;
+    } else {
+      AVLNode *parent = node->parent;
+      if (!parent) {
+        return nullptr;
+      }
+      if (parent->right == node) {
+        pos -= avl_cnt(node->left) + 1;
+      } else {
+        pos += avl_cnt(node->right) + 1;
+      }
+      node = parent;
+    }
+  }
+  return node;
+}
+
+// 查找大于或等于给定参数的（分数，名称）元组，然后根据它进行偏移
+ZNode *zset_query(ZSet *zset, double score, const char *name, size_t len,
+                  int64_t offset) {
+  AVLNode *found = nullptr;
+  AVLNode *cur = zset->root;
+  while (cur) {
+    if (zless(cur, score, name, len)) {
+      cur = cur->right;
+    } else {
+      found = cur;
+      cur = cur->left;
+    }
+  }
+  if (found) {
+    found = alv_offset(cur, offset);
+  }
+  return found ? container_of(found, ZNode, tree) : nullptr;
+}
