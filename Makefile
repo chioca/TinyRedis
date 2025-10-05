@@ -10,7 +10,7 @@ $(OUTDIR):
 
 # 生成 server
 $(OUTDIR)/server: server.cpp | $(OUTDIR)
-	$(CXX) $(CXXFLAGS) server.cpp hmap.cpp -o $@
+	$(CXX) $(CXXFLAGS) server.cpp hashtable.cpp z_set.cpp -o $@
 
 # 生成 client
 $(OUTDIR)/client: client.cpp | $(OUTDIR)
