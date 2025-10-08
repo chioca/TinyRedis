@@ -1,3 +1,9 @@
+#pragma once
+
+#include <time.h>
+
+#include <cstdint>
+
 struct DList {
   DList *prev;
   DList *next;
@@ -20,4 +26,10 @@ inline void dlist_insert_before(DList *target, DList *node) {
   node->prev = prev;
   node->next = target;
   target->prev = node;
+}
+
+inline uint64_t get_monotonic_usec() {
+  timespec tv = {0, 0};
+  clock_gettime(CLOCK_MONOTONIC, &tv);
+  return uint64_t(tv.tv_sec) * 1000000 + tv.tv_nsec / 1000;
 }
